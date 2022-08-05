@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"os/user"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -86,8 +89,16 @@ func (ld *LinkDump) dump(force bool) bool {
 		return false
 	default:
 		log.Printf("Dumping link queue (size %d) to email\n", l)
-		t := time.Now().Format(time.UnixDate)
-		msg := fmt.Sprintf("Subject: linkdump - %s\nTo: %s\n\n", t, ld.EmailAddr)
+		now := time.Now()
+		msgID, err := genMsgID(now)
+		if err != nil {
+			log.Printf("Failed to generate Message-ID for email: %v\n", err)
+			goto failure
+		}
+
+		msg := fmt.Sprintf("Subject: linkdump - %s\n", now.Format(time.UnixDate))
+		msg += fmt.Sprintf("To: %s\n", ld.EmailAddr)
+		msg += fmt.Sprintf("Message-ID: <%s>\n\n", msgID)
 		for i, link := range ld.LinkQueue {
 			msg += fmt.Sprintf("%d. %s\n", i+1, link)
 		}
@@ -118,6 +129,23 @@ func (ld *LinkDump) dump(force bool) bool {
 failure:
 	log.Printf("Failed dump, link queue unchanged\n")
 	return false
+}
+
+func genMsgID(now time.Time) (string, error) {
+	timestamp := strconv.FormatInt(now.UnixMilli(), 36)
+
+	randomSlice := make([]byte, 8)
+	if _, err := rand.Read(randomSlice); err != nil {
+		return "", err
+	}
+	random := strconv.FormatUint(binary.BigEndian.Uint64(randomSlice), 36)
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s.%s@%s", timestamp, random, hostname), nil
 }
 
 func main() {
